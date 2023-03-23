@@ -1,0 +1,73 @@
+#!/usr/bin/env python
+"""
+Bumper command takes the currently focused in Hyprland and docks it on the
+left of the screen as a floating window. You can then show and hide that
+window based on keymappings you setup in ~/.config/hypr/hyprland.conf
+
+Commands: toggle, dock
+"""
+
+import subprocess
+import json
+import sys
+
+sh = lambda x: subprocess.run(x, capture_output=True, shell=True).stdout
+
+windows = json.loads(sh('hyprctl -j clients'))
+window = json.loads(sh('hyprctl -j activewindow'))
+monitor = json.loads(sh('hyprctl -j monitors'))[window['monitor']]
+
+# Ensure bumper state file exists
+sh('touch /tmp/bumper.window')
+bumper_window_address = open('/tmp/bumper.window', 'r').read()
+
+
+bumper_width = int(monitor['width'] * 0.66 / monitor['scale'])
+bumper_height = int(monitor['height'] * 0.92  / monitor['scale'])
+
+bumper_window = None
+if bumper_window_address:
+    for w in windows:
+        if w['address'] == bumper_window_address:
+            bumper_window = w
+            break
+
+
+if bumper_window:
+    bumper_width = int(bumper_window['size'][0])
+    bumper_height = int(bumper_window['size'][1])
+
+x = -(bumper_width) + 4
+y = 48
+
+if sys.argv[1] == 'toggle':
+    if bumper_window:
+        hidden = bumper_window['at'][0] < 0
+        if hidden:
+            sh('hyprctl --batch "' + '; '.join([
+                'dispatch movewindowpixel exact 0 {},address:{}'.format(y, bumper_window['address']),
+                'dispatch focuswindow address:{}'.format(bumper_window['address']),
+            ]) + '"')
+        else:
+            sh('hyprctl --batch "' + '; '.join([
+                'dispatch movewindowpixel exact 0 {},address:{}'.format(y, bumper_window['address']),
+                'dispatch movewindowpixel {} 0,address:{}'.format(x, bumper_window['address']),
+                'dispatch cyclenext',
+            ]) + '"')
+elif sys.argv[1] == 'dock':
+    if bumper_window:
+        sh('hyprctl --batch "' + '; '.join([
+            'dispatch togglefloating address:{}'.format(bumper_window['address']),
+        ]) + '"')
+        open('/tmp/bumper.window', 'w').write('')
+    else:
+        sh('hyprctl --batch "' + '; '.join([
+            'dispatch togglefloating address:{}'.format(window['address']),
+            'dispatch pin address:{}'.format(window['address']),
+            'dispatch resizeactive exact {} {}'.format(bumper_width, bumper_height),
+            'dispatch moveactive exact 0 0',
+            'dispatch moveactive {} {}'.format(x, y)
+        ]) + '"')
+        open('/tmp/bumper.window', 'w').write(window['address'])
+else:
+    print('Usage: bumper [show|hide|dock|undock]')
