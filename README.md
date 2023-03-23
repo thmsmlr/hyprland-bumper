@@ -3,6 +3,9 @@
 Pin and float a window off to the side of the display for reference on [hyprland](https://github.com/hyprwm/Hyprland)
 
 
+https://user-images.githubusercontent.com/167206/227375567-30f80218-b53d-4bc4-a024-c131e900bae6.mp4
+
+
 ## Installation
 
 Clone this repo
