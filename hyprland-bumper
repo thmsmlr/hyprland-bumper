@@ -1,26 +1,27 @@
 #!/usr/bin/env python
-"""
-Bumper command takes the currently focused in Hyprland and docks it on the
-left of the screen as a floating window. You can then show and hide that
-window based on keymappings you setup in ~/.config/hypr/hyprland.conf
-
-Commands: toggle, dock
-"""
 
 import subprocess
 import json
 import sys
+import argparse
+
+parser = argparse.ArgumentParser(description='Bumper command takes the currently focused in Hyprland and docks it on the left of the screen as a floating window. You can then show and hide that window based on keymappings you setup in ~/.config/hypr/hyprland.conf')
+parser.add_argument('command', type=str, help='The command to run. Either "dock" or "toggle"')
+parser.add_argument('-d', '--direction', type=str, help='The direction to dock the window. Either "left" or "right"')
+args = parser.parse_args(sys.argv[1:])
+print(args)
+
 
 sh = lambda x: subprocess.run(x, capture_output=True, shell=True).stdout
 
 windows = json.loads(sh('hyprctl -j clients'))
 window = json.loads(sh('hyprctl -j activewindow'))
 monitor = json.loads(sh('hyprctl -j monitors'))[window['monitor']]
+tmppath = '/tmp/bumper.window.{}'.format(args.direction)
 
 # Ensure bumper state file exists
-sh('touch /tmp/bumper.window')
-bumper_window_address = open('/tmp/bumper.window', 'r').read()
-
+sh(f"touch {tmppath}")
+bumper_window_address = open(tmppath, 'r').read()
 
 bumper_width = int(monitor['width'] * 0.66 / monitor['scale'])
 bumper_height = int(monitor['height'] * 0.92  / monitor['scale'])
@@ -37,37 +38,46 @@ if bumper_window:
     bumper_width = int(bumper_window['size'][0])
     bumper_height = int(bumper_window['size'][1])
 
-x = -(bumper_width) + 4
-y = 48
 
-if sys.argv[1] == 'toggle':
+if args.direction == 'left':
+    hidden_x = -(bumper_width) + 4
+    hidden_y = 48
+    shown_x = 4
+    shown_y = 48
+else:
+    hidden_x = int(monitor['width'] / monitor['scale']) - 4
+    hidden_y = 48
+    shown_x = int(monitor['width'] / monitor['scale']) - bumper_width - 4
+    shown_y = 48
+
+if args.command == 'toggle':
     if bumper_window:
-        hidden = bumper_window['at'][0] < 0
+        hidden = bumper_window['at'][0] < shown_x if args.direction == 'left' else bumper_window['at'][0] > shown_x
         if hidden:
             sh('hyprctl --batch "' + '; '.join([
-                'dispatch movewindowpixel exact 0 {},address:{}'.format(y, bumper_window['address']),
+                'dispatch movewindowpixel exact {} {},address:{}'.format(shown_x, shown_y, bumper_window['address']),
                 'dispatch focuswindow address:{}'.format(bumper_window['address']),
             ]) + '"')
         else:
             sh('hyprctl --batch "' + '; '.join([
-                'dispatch movewindowpixel exact 0 {},address:{}'.format(y, bumper_window['address']),
-                'dispatch movewindowpixel {} 0,address:{}'.format(x, bumper_window['address']),
+                'dispatch movewindowpixel exact 0 {},address:{}'.format(hidden_y, bumper_window['address']),
+                'dispatch movewindowpixel {} 0,address:{}'.format(hidden_x, bumper_window['address']),
                 'dispatch cyclenext',
             ]) + '"')
-elif sys.argv[1] == 'dock':
+elif args.command == 'dock':
     if bumper_window:
         sh('hyprctl --batch "' + '; '.join([
             'dispatch togglefloating address:{}'.format(bumper_window['address']),
         ]) + '"')
-        open('/tmp/bumper.window', 'w').write('')
+        open(tmppath, 'w').write('')
     else:
         sh('hyprctl --batch "' + '; '.join([
             'dispatch togglefloating address:{}'.format(window['address']),
             'dispatch pin address:{}'.format(window['address']),
             'dispatch resizeactive exact {} {}'.format(bumper_width, bumper_height),
             'dispatch moveactive exact 0 0',
-            'dispatch moveactive {} {}'.format(x, y)
+            'dispatch moveactive {} {}'.format(hidden_x, hidden_y)
         ]) + '"')
-        open('/tmp/bumper.window', 'w').write(window['address'])
+        open(tmppath, 'w').write(window['address'])
 else:
-    print('Usage: bumper [show|hide|dock|undock]')
+    print(parser.print_help())
