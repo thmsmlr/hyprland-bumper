@@ -16,7 +16,12 @@ sh = lambda x: subprocess.run(x, capture_output=True, shell=True).stdout
 
 windows = json.loads(sh('hyprctl -j clients'))
 window = json.loads(sh('hyprctl -j activewindow'))
-monitor = json.loads(sh('hyprctl -j monitors'))[window['monitor']]
+
+monitor_idx = 0
+if window:
+    monitor_idx = window['monitor']
+
+monitor = json.loads(sh('hyprctl -j monitors'))[monitor_idx]
 tmppath = '/tmp/bumper.window.{}'.format(args.direction)
 
 # Ensure bumper state file exists
