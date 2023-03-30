@@ -67,7 +67,7 @@ if args.command == 'toggle':
             sh('hyprctl --batch "' + '; '.join([
                 'dispatch movewindowpixel exact 0 {},address:{}'.format(hidden_y, bumper_window['address']),
                 'dispatch movewindowpixel {} 0,address:{}'.format(hidden_x, bumper_window['address']),
-                'dispatch cyclenext',
+                'dispatch focuscurrentorlast',
             ]) + '"')
 elif args.command == 'dock':
     if bumper_window:
