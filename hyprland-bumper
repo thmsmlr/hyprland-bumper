@@ -9,8 +9,6 @@ parser = argparse.ArgumentParser(description='Bumper command takes the currently
 parser.add_argument('command', type=str, help='The command to run. Either "dock" or "toggle"')
 parser.add_argument('-d', '--direction', type=str, help='The direction to dock the window. Either "left" or "right"')
 args = parser.parse_args(sys.argv[1:])
-print(args)
-
 
 sh = lambda x: subprocess.run(x, capture_output=True, shell=True).stdout
 
@@ -18,8 +16,10 @@ windows = json.loads(sh('hyprctl -j clients'))
 window = json.loads(sh('hyprctl -j activewindow'))
 
 monitor_idx = 0
+current_workspace_id = None
 if window:
     monitor_idx = window['monitor']
+    current_workspace_id = window['workspace']['id']
 
 monitor = json.loads(sh('hyprctl -j monitors'))[monitor_idx]
 tmppath = '/tmp/bumper.window.{}'.format(args.direction)
@@ -71,9 +71,16 @@ if args.command == 'toggle':
             ]) + '"')
         else:
             last_window_address = open(tmpfocuspath, 'r').read()
-            focus_cmd = 'dispatch movefocus r'
-            if last_window_address:
+            last_window = None
+            for w in windows:
+                if w['address'] == last_window_address:
+                    last_window = w
+                    break
+
+            if last_window and last_window['workspace']['id'] == current_workspace_id:
                 focus_cmd = 'dispatch focuswindow address:{}'.format(last_window_address)
+            else:
+                focus_cmd = ''
 
             sh('hyprctl --batch "' + '; '.join([
                 'dispatch movewindowpixel exact 0 {},address:{}'.format(hidden_y, bumper_window['address']),
