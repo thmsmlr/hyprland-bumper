@@ -23,9 +23,11 @@ if window:
 
 monitor = json.loads(sh('hyprctl -j monitors'))[monitor_idx]
 tmppath = '/tmp/bumper.window.{}'.format(args.direction)
+tmpfocuspath = '/tmp/window.last.focus'
 
 # Ensure bumper state file exists
 sh(f"touch {tmppath}")
+sh(f"touch {tmpfocuspath}")
 bumper_window_address = open(tmppath, 'r').read()
 
 bumper_width = int(monitor['width'] * 0.66 / monitor['scale'])
@@ -59,15 +61,24 @@ if args.command == 'toggle':
     if bumper_window:
         hidden = bumper_window['at'][0] < shown_x if args.direction == 'left' else bumper_window['at'][0] > shown_x
         if hidden:
+            # Log the currently focused window and workspace number so we can restore it
+            if window['address']:
+                open(tmpfocuspath, 'w').write(window['address'])
+
             sh('hyprctl --batch "' + '; '.join([
                 'dispatch movewindowpixel exact {} {},address:{}'.format(shown_x, shown_y, bumper_window['address']),
                 'dispatch focuswindow address:{}'.format(bumper_window['address']),
             ]) + '"')
         else:
+            last_window_address = open(tmpfocuspath, 'r').read()
+            focus_cmd = 'dispatch movefocus r'
+            if last_window_address:
+                focus_cmd = 'dispatch focuswindow address:{}'.format(last_window_address)
+
             sh('hyprctl --batch "' + '; '.join([
                 'dispatch movewindowpixel exact 0 {},address:{}'.format(hidden_y, bumper_window['address']),
                 'dispatch movewindowpixel {} 0,address:{}'.format(hidden_x, bumper_window['address']),
-                'dispatch focuscurrentorlast',
+                focus_cmd
             ]) + '"')
 elif args.command == 'dock':
     if bumper_window:
