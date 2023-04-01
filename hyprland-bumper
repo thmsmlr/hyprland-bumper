@@ -4,72 +4,119 @@ import subprocess
 import json
 import sys
 import argparse
+import os
+import socket
+
+cmd = os.path.abspath(sys.argv[0])
+print(cmd)
 
 parser = argparse.ArgumentParser(description='Bumper command takes the currently focused in Hyprland and docks it on the left of the screen as a floating window. You can then show and hide that window based on keymappings you setup in ~/.config/hypr/hyprland.conf')
-parser.add_argument('command', type=str, help='The command to run. Either "dock" or "toggle"')
-parser.add_argument('-d', '--direction', type=str, help='The direction to dock the window. Either "left" or "right"')
+parser.add_argument('command', type=str, help='The command to run. Either "dock" or "toggle" or "daemon" or "hide"')
+parser.add_argument('-d', '--direction', type=str, help='The direction to dock the window. Either "left" or "right"', default="left")
 args = parser.parse_args(sys.argv[1:])
 
 sh = lambda x: subprocess.run(x, capture_output=True, shell=True).stdout
 
-windows = json.loads(sh('hyprctl -j clients'))
-window = json.loads(sh('hyprctl -j activewindow'))
 
-monitor_idx = 0
-current_workspace_id = None
-if window:
-    monitor_idx = window['monitor']
-    current_workspace_id = window['workspace']['id']
+def ensure_daemon_running():
+    pid = sh(f"pgrep -f '{cmd} daemon'").strip()
+    if not pid:
+        sh(f"{cmd} daemon > /tmp/hyprland-bumper-daemon.log 2>&1 &")
 
-monitor = json.loads(sh('hyprctl -j monitors'))[monitor_idx]
-tmppath = '/tmp/bumper.window.{}'.format(args.direction)
-tmpfocuspath = '/tmp/window.last.focus'
+if args.command == 'daemon':
+    def handle(line):
+        print(line)
+        if line.startswith("workspace"):
+            sh(f"{cmd} hide -d left &")
+            sh(f"{cmd} hide -d right &")
 
-# Ensure bumper state file exists
-sh(f"touch {tmppath}")
-sh(f"touch {tmpfocuspath}")
-bumper_window_address = open(tmppath, 'r').read()
+    hypreland_instance_signature = os.getenv('HYPRLAND_INSTANCE_SIGNATURE')
+    socket_path = f'/tmp/hypr/{hypreland_instance_signature}/.socket2.sock'
 
-bumper_width = int(monitor['width'] * 0.66 / monitor['scale'])
-bumper_height = int(monitor['height'] * 0.92  / monitor['scale'])
-
-bumper_window = None
-if bumper_window_address:
-    for w in windows:
-        if w['address'] == bumper_window_address:
-            bumper_window = w
-            break
-
-
-if bumper_window:
-    bumper_width = int(bumper_window['size'][0])
-    bumper_height = int(bumper_window['size'][1])
-
-
-if args.direction == 'left':
-    hidden_x = -(bumper_width) + 4
-    hidden_y = 48
-    shown_x = 4
-    shown_y = 48
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.connect(socket_path)
+        file = sock.makefile('r')
+        while True:
+            line = file.readline()
+            if not line:
+                break
+            handle(line.strip())
 else:
-    hidden_x = int(monitor['width'] / monitor['scale']) - 4
-    hidden_y = 48
-    shown_x = int(monitor['width'] / monitor['scale']) - bumper_width - 4
-    shown_y = 48
+    windows = json.loads(sh('hyprctl -j clients'))
+    window = json.loads(sh('hyprctl -j activewindow'))
 
-if args.command == 'toggle':
+    monitor_idx = 0
+    current_workspace_id = None
+    if window:
+        monitor_idx = window['monitor']
+        current_workspace_id = window['workspace']['id']
+
+    monitor = json.loads(sh('hyprctl -j monitors'))[monitor_idx]
+    tmppath = '/tmp/bumper.window.{}'.format(args.direction)
+    tmpfocuspath = '/tmp/window.last.focus'
+
+    # Ensure bumper state file exists
+    sh(f"touch {tmppath}")
+    sh(f"touch {tmpfocuspath}")
+    bumper_window_address = open(tmppath, 'r').read()
+
+    bumper_width = int(monitor['width'] * 0.66 / monitor['scale'])
+    bumper_height = int(monitor['height'] * 0.92  / monitor['scale'])
+
+    bumper_window = None
+    if bumper_window_address:
+        for w in windows:
+            if w['address'] == bumper_window_address:
+                bumper_window = w
+                break
+
     if bumper_window:
-        hidden = bumper_window['at'][0] < shown_x if args.direction == 'left' else bumper_window['at'][0] > shown_x
-        if hidden:
-            # Log the currently focused window and workspace number so we can restore it
-            if window['address']:
-                open(tmpfocuspath, 'w').write(window['address'])
+        bumper_width = int(bumper_window['size'][0])
+        bumper_height = int(bumper_window['size'][1])
 
-            sh('hyprctl --batch "' + '; '.join([
-                'dispatch movewindowpixel exact {} {},address:{}'.format(shown_x, shown_y, bumper_window['address']),
-                'dispatch focuswindow address:{}'.format(bumper_window['address']),
-            ]) + '"')
-        else:
+    if args.direction == 'left':
+        hidden_x = -(bumper_width) + 4
+        hidden_y = 48
+        shown_x = 4
+        shown_y = 48
+    else:
+        hidden_x = int(monitor['width'] / monitor['scale']) - 4
+        hidden_y = 48
+        shown_x = int(monitor['width'] / monitor['scale']) - bumper_width - 4
+        shown_y = 48
+
+    if args.command == 'toggle':
+        if bumper_window:
+            hidden = bumper_window['at'][0] < shown_x if args.direction == 'left' else bumper_window['at'][0] > shown_x
+            if hidden:
+                # Log the currently focused window and workspace number so we can restore it
+                if window['address']:
+                    open(tmpfocuspath, 'w').write(window['address'])
+
+                sh('hyprctl --batch "' + '; '.join([
+                    'dispatch movewindowpixel exact {} {},address:{}'.format(shown_x, shown_y, bumper_window['address']),
+                    'dispatch focuswindow address:{}'.format(bumper_window['address']),
+                ]) + '"')
+            else:
+                last_window_address = open(tmpfocuspath, 'r').read()
+                last_window = None
+                for w in windows:
+                    if w['address'] == last_window_address:
+                        last_window = w
+                        break
+
+                if last_window and last_window['workspace']['id'] == current_workspace_id:
+                    focus_cmd = 'dispatch focuswindow address:{}'.format(last_window_address)
+                else:
+                    focus_cmd = ''
+
+                sh('hyprctl --batch "' + '; '.join([
+                    'dispatch movewindowpixel exact 0 {},address:{}'.format(hidden_y, bumper_window['address']),
+                    'dispatch movewindowpixel {} 0,address:{}'.format(hidden_x, bumper_window['address']),
+                    focus_cmd
+                ]) + '"')
+    elif args.command == 'hide':
+        if bumper_window:
             last_window_address = open(tmpfocuspath, 'r').read()
             last_window = None
             for w in windows:
@@ -87,20 +134,22 @@ if args.command == 'toggle':
                 'dispatch movewindowpixel {} 0,address:{}'.format(hidden_x, bumper_window['address']),
                 focus_cmd
             ]) + '"')
-elif args.command == 'dock':
-    if bumper_window:
-        sh('hyprctl --batch "' + '; '.join([
-            'dispatch togglefloating address:{}'.format(bumper_window['address']),
-        ]) + '"')
-        open(tmppath, 'w').write('')
+    elif args.command == 'dock':
+        if bumper_window:
+            sh('hyprctl --batch "' + '; '.join([
+                'dispatch togglefloating address:{}'.format(bumper_window['address']),
+            ]) + '"')
+            open(tmppath, 'w').write('')
+        else:
+            sh('hyprctl --batch "' + '; '.join([
+                'dispatch togglefloating address:{}'.format(window['address']),
+                'dispatch pin address:{}'.format(window['address']),
+                'dispatch resizeactive exact {} {}'.format(bumper_width, bumper_height),
+                'dispatch moveactive exact 0 0',
+                'dispatch moveactive {} {}'.format(shown_x, shown_y)
+            ]) + '"')
+            open(tmppath, 'w').write(window['address'])
     else:
-        sh('hyprctl --batch "' + '; '.join([
-            'dispatch togglefloating address:{}'.format(window['address']),
-            'dispatch pin address:{}'.format(window['address']),
-            'dispatch resizeactive exact {} {}'.format(bumper_width, bumper_height),
-            'dispatch moveactive exact 0 0',
-            'dispatch moveactive {} {}'.format(shown_x, shown_y)
-        ]) + '"')
-        open(tmppath, 'w').write(window['address'])
-else:
-    print(parser.print_help())
+        print(parser.print_help())
+
+ensure_daemon_running()
