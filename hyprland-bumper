@@ -11,7 +11,7 @@ cmd = os.path.abspath(sys.argv[0])
 print(cmd)
 
 parser = argparse.ArgumentParser(description='Bumper command takes the currently focused in Hyprland and docks it on the left of the screen as a floating window. You can then show and hide that window based on keymappings you setup in ~/.config/hypr/hyprland.conf')
-parser.add_argument('command', type=str, help='The command to run. Either "dock" or "toggle" or "daemon" or "hide"')
+parser.add_argument('command', type=str, help='The command to run. Either "dock" or "toggle" or "daemon" or "hide" or "show"')
 parser.add_argument('-d', '--direction', type=str, help='The direction to dock the window. Either "left" or "right"', default="left")
 args = parser.parse_args(sys.argv[1:])
 
@@ -21,7 +21,12 @@ sh = lambda x: subprocess.run(x, capture_output=True, shell=True).stdout
 def ensure_daemon_running():
     pid = sh(f"pgrep -f '{cmd} daemon'").strip()
     if not pid:
-        sh(f"{cmd} daemon > /tmp/hyprland-bumper-daemon.log 2>&1 &")
+        sh(f"{cmd} daemon > /tmp/hyprland-bumper-daemon.log &")
+
+def get_bumper_window_address(direction):
+    tmppath = '/tmp/bumper.window.{}'.format(direction)
+    bumper_window_address = open(tmppath, 'r').read()
+    return bumper_window_address
 
 if args.command == 'daemon':
     def handle(line):
@@ -29,6 +34,17 @@ if args.command == 'daemon':
         if line.startswith("workspace"):
             sh(f"{cmd} hide -d left &")
             sh(f"{cmd} hide -d right &")
+        if line.startswith("activewindowv2"):
+            address = "0x" + line.split('>>')[1]
+            for dir in ["left", "right"]:
+                bumper_window_address = get_bumper_window_address(dir)
+                if bumper_window_address == address:
+                    # sh(f"{cmd} show -d {dir} &")
+                    pass
+                else:
+                    sh(f"{cmd} hide -d {dir} &")
+
+        sys.stdout.flush()
 
     hypreland_instance_signature = os.getenv('HYPRLAND_INSTANCE_SIGNATURE')
     socket_path = f'/tmp/hypr/{hypreland_instance_signature}/.socket2.sock'
@@ -115,25 +131,39 @@ else:
                     'dispatch movewindowpixel {} 0,address:{}'.format(hidden_x, bumper_window['address']),
                     focus_cmd
                 ]) + '"')
+    elif args.command == 'show':
+        if bumper_window:
+            hidden = bumper_window['at'][0] < shown_x if args.direction == 'left' else bumper_window['at'][0] > shown_x
+            if hidden:
+                # Log the currently focused window and workspace number so we can restore it
+                if window['address']:
+                    open(tmpfocuspath, 'w').write(window['address'])
+
+                sh('hyprctl --batch "' + '; '.join([
+                    'dispatch movewindowpixel exact {} {},address:{}'.format(shown_x, shown_y, bumper_window['address']),
+                    # 'dispatch focuswindow address:{}'.format(bumper_window['address']),
+                ]) + '"')
     elif args.command == 'hide':
         if bumper_window:
-            last_window_address = open(tmpfocuspath, 'r').read()
-            last_window = None
-            for w in windows:
-                if w['address'] == last_window_address:
-                    last_window = w
-                    break
+            hidden = bumper_window['at'][0] < shown_x if args.direction == 'left' else bumper_window['at'][0] > shown_x
+            if not hidden:
+                last_window_address = open(tmpfocuspath, 'r').read()
+                last_window = None
+                for w in windows:
+                    if w['address'] == last_window_address:
+                        last_window = w
+                        break
 
-            if last_window and last_window['workspace']['id'] == current_workspace_id:
-                focus_cmd = 'dispatch focuswindow address:{}'.format(last_window_address)
-            else:
-                focus_cmd = ''
+                if last_window and last_window['workspace']['id'] == current_workspace_id:
+                    focus_cmd = 'dispatch focuswindow address:{}'.format(last_window_address)
+                else:
+                    focus_cmd = ''
 
-            sh('hyprctl --batch "' + '; '.join([
-                'dispatch movewindowpixel exact 0 {},address:{}'.format(hidden_y, bumper_window['address']),
-                'dispatch movewindowpixel {} 0,address:{}'.format(hidden_x, bumper_window['address']),
-                focus_cmd
-            ]) + '"')
+                sh('hyprctl --batch "' + '; '.join([
+                    'dispatch movewindowpixel exact 0 {},address:{}'.format(hidden_y, bumper_window['address']),
+                    'dispatch movewindowpixel {} 0,address:{}'.format(hidden_x, bumper_window['address']),
+                    # focus_cmd
+                ]) + '"')
     elif args.command == 'dock':
         if bumper_window:
             sh('hyprctl --batch "' + '; '.join([
