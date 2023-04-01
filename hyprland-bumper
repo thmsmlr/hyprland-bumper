@@ -99,7 +99,7 @@ elif args.command == 'dock':
             'dispatch pin address:{}'.format(window['address']),
             'dispatch resizeactive exact {} {}'.format(bumper_width, bumper_height),
             'dispatch moveactive exact 0 0',
-            'dispatch moveactive {} {}'.format(hidden_x, hidden_y)
+            'dispatch moveactive {} {}'.format(shown_x, shown_y)
         ]) + '"')
         open(tmppath, 'w').write(window['address'])
 else:
